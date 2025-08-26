@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Slide Chat</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Office JS library -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // --- إعدادات Firebase ---
+        // تم تحديث هذا الكائن بالإعدادات الخاصة بك
+        const firebaseConfig = {
+          apiKey: "AIzaSyAkqdKG4Cf0x_uDqulGtY0ouFvrvejN5u0",
+          authDomain: "myslide-chat-project.firebaseapp.com",
+          projectId: "myslide-chat-project",
+          storageBucket: "myslide-chat-project.appspot.com",
+          messagingSenderId: "55150772606",
+          appId: "1:55150772606:web:63e86aa97ccf39b16eb32f"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let documentId = '';
+        let currentUser = 'المستخدم ' + Math.floor(Math.random() * 1000); // اسم مستخدم افتراضي
+
+        // Initialize Office Add-in
+        Office.onReady(info => {
+            if (info.host === Office.HostType.PowerPoint) {
+                // الحصول على معرف فريد للمستند لإنشاء غرفة دردشة خاصة به
+                Office.context.document.getFilePropertiesAsync(result => {
+                    if (result.status === Office.AsyncResultStatus.Succeeded) {
+                        // نستخدم رابط الملف كمعرف فريد لغرفة الدردشة
+                        documentId = result.value.url || 'default-chat-room';
+                        if (!documentId || documentId.trim() === '') {
+                           documentId = 'default-chat-room-local';
+                        }
+                        console.log("Document ID for chat:", documentId);
+                        listenForMessages();
+                    } else {
+                        console.error("Failed to get document properties:", result.error.message);
+                        documentId = 'default-chat-room-error';
+                        listenForMessages();
+                    }
+                });
+
+                // إعداد واجهة المستخدم
+                setupUI();
+            }
+        });
+
+        function setupUI() {
+            const sendButton = document.getElementById('send-button');
+            const messageInput = document.getElementById('message-input');
+            const chatBox = document.getElementById('chat-box');
+            
+            // تعيين اسم المستخدم الحالي
+            document.getElementById('current-user').textContent = `تسجيل الدخول كـ: ${currentUser}`;
+
+            sendButton.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+            });
+        }
+        
+        async function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const messageText = messageInput.value.trim();
+
+            if (messageText === '' || !documentId) {
+                return;
+            }
+
+            try {
+                // إضافة الرسالة إلى Firestore
+                await addDoc(collection(db, "chats", btoa(documentId), "messages"), {
+                    user: currentUser,
+                    text: messageText,
+                    timestamp: serverTimestamp()
+                });
+                messageInput.value = ''; // مسح حقل الإدخال
+                messageInput.focus();
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                // عرض رسالة خطأ للمستخدم
+                const chatBox = document.getElementById('chat-box');
+                const errorElement = document.createElement('div');
+                errorElement.className = 'text-red-500 text-xs text-center my-2';
+                errorElement.textContent = 'فشل إرسال الرسالة. الرجاء التحقق من إعدادات Firebase.';
+                chatBox.appendChild(errorElement);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }
+        
+        function listenForMessages() {
+            if (!documentId) return;
+
+            const chatBox = document.getElementById('chat-box');
+            const messagesRef = collection(db, "chats", btoa(documentId), "messages");
+            const q = query(messagesRef, orderBy("timestamp"));
+
+            // الاستماع للتحديثات الفورية
+            onSnapshot(q, (querySnapshot) => {
+                chatBox.innerHTML = ''; // مسح الرسائل القديمة عند كل تحديث
+                querySnapshot.forEach((doc) => {
+                    const message = doc.data();
+                    const messageElement = document.createElement('div');
+                    
+                    const isCurrentUser = message.user === currentUser;
+
+                    messageElement.className = `p-3 rounded-lg max-w-xs mb-2 ${isCurrentUser ? 'bg-blue-500 text-white self-end rounded-br-none' : 'bg-gray-200 text-gray-800 self-start rounded-bl-none'}`;
+                    
+                    messageElement.innerHTML = `
+                        <p class="font-bold text-sm">${message.user}</p>
+                        <p class="text-base">${message.text.replace(/\n/g, '<br>')}</p>
+                        <p class="text-xs opacity-70 mt-1 text-right">${message.timestamp ? new Date(message.timestamp.toDate()).toLocaleTimeString('ar-EG') : ''}</p>
+                    `;
+                    chatBox.appendChild(messageElement);
+                });
+                // التمرير لأسفل تلقائيًا
+                chatBox.scrollTop = chatBox.scrollHeight;
+            });
+        }
+
+    </script>
+</head>
+<body class="bg-gray-50 font-sans flex flex-col h-screen">
+
+    <!-- Header -->
+    <header class="bg-white p-3 border-b border-gray-200 shadow-sm text-center">
+        <h1 class="text-lg font-bold text-gray-800">
+            <img src="https://placehold.co/30x30/0078D4/FFFFFF?text=MS" alt="My Slide Logo" class="inline-block w-6 h-6 ml-2 rounded">
+            My Slide Chat
+        </h1>
+        <p id="current-user" class="text-xs text-gray-500 mt-1"></p>
+    </header>
+
+    <!-- Chat Messages -->
+    <main id="chat-box" class="flex-1 p-4 overflow-y-auto flex flex-col space-y-2 bg-gray-100">
+        <!-- Messages will be dynamically inserted here -->
+        <div class="p-3 rounded-lg max-w-xs mb-2 bg-gray-200 text-gray-800 self-start rounded-bl-none">
+            <p class="font-bold text-sm">النظام</p>
+            <p class="text-base">مرحباً بك في الدردشة! جميع المشاركين في هذا العرض التقديمي يمكنهم رؤية الرسائل هنا.</p>
+        </div>
+    </main>
+
+    <!-- Message Input -->
+    <footer class="bg-white p-3 border-t border-gray-200">
+        <div class="flex items-center space-x-2 space-x-reverse">
+            <textarea id="message-input" rows="1" class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none" placeholder="اكتب رسالتك هنا..."></textarea>
+            <button id="send-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="00 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+            </button>
+        </div>
+    </footer>
+
+</body>
+</html>
